@@ -1,0 +1,9 @@
+// Assume program is loaded into x3000
+x5020	// AND R0, R0, #0
+x1021	// ADD R0, R0, #1
+x1200	// ADD R1, R0, R0
+x3204	// ST R1, x3008
+x2403	// LD R2, x3008
+x2001	// LD R0, x3007
+xC000	// JMP R0
+x3000	// ST R0, x3008  # Value = x3000
