@@ -53,7 +53,7 @@ module SingleCycleCPU(halt, clk, rst);
    wire        MemWrEn;
    
    wire [4:0]  Rsrc1, Rsrc2, Rdst;
-   wire [`WORD_WIDTH-1:0] Rdata1, Rdata2, RWrdata;
+   wire [`WORD_WIDTH-1:0] Rdata1, Rdata2, RWrdata, EU_out;
    wire [`WORD_WIDTH-1 :0] immediate;
    wire        RWrEn;
    wire        ALUSrc, EACalc;
@@ -112,11 +112,20 @@ module SingleCycleCPU(halt, clk, rst);
 
    assign MemWrEn = (opcode == `OPCODE_STORE);
 
+   assign DataAddr = (opcode == `OPCODE_LOAD) ? EU_out: 32'hXXXXXXXX;
+
+   assign MemSize = ((opcode == `OPCODE_LOAD) && ((funct3 == `FUNC_LB) || (funct3 == `FUNC_LBU))) ? SIZE_BYTE :
+                     ((opcode == `OPCODE_LOAD) && ((funct3 == `FUNC_LH) || (funct3 == `FUNC_LHU))) ? SIZE_HWORD :
+                     ((opcode == `OPCODE_LOAD) && (funct3 == `FUNC_LW)) ? SIZE_WORD : 2'bXX; 
+                     
+
    assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD);  
+   assign RWrdata = (opcode == `OPCODE_LOAD) ? DataWord : 
+                    (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM) ? EU_out : 32'hXXXXXXXX;
 
    // Supports R-Type and I-type instructions -- please add muxes and other control signals
    
-   ExecutionUnit EU(.out(RWrdata),
+   ExecutionUnit EU(.out(EU_out),
                     .opA(Rdata1), 
                     .opB(Rdata2), 
                     .func(funct3), 
