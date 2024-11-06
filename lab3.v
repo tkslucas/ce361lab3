@@ -77,12 +77,12 @@ module SingleCycleCPU(halt, clk, rst);
                        (funct3 == `FUNC_SLT) || (funct3 == `FUNC_SLTU)))
                         ));
 
-   assign Inv_I_type = ((opcode == `OPCODE_COMPUTE_IMM) && (func3 == `FUNC_ADD || func3 == `FUNC_XOR 
-                        || func3 == `FUNC_OR || func3 == `FUNC_AND || func3 == `FUNC_SLL || func3 == `FUNC_SRL ||
-                        func3 == `FUNC_SRA || func3 == `FUNC_SLT || func3 == `FUNC_SLTU));
+   assign Inv_I_type = ((opcode == `OPCODE_COMPUTE_IMM) && ((funct3 == `FUNC_ADD || funct3 == `FUNC_XOR 
+                        || funct3 == `FUNC_OR || funct3 == `FUNC_AND || funct3 == `FUNC_SLL || funct3 == `FUNC_SRL ||
+                        funct3 == `FUNC_SRA || funct3 == `FUNC_SLT || funct3 == `FUNC_SLTU)));
 
-   assign Inv_Loads = ((opcode == `OPCODE_LOAD) && (func3 == `FUNC_LB || func3 == `FUNC_LH || func3 == `FUNC_LW
-                       || func3 == `FUNC_LBU || func3 == `FUNC_LHU));
+   assign Inv_Loads = ((opcode == `OPCODE_LOAD) && (funct3 == `FUNC_LB || funct3 == `FUNC_LH || funct3 == `FUNC_LW
+                       || funct3 == `FUNC_LBU || funct3 == `FUNC_LHU));
          
    assign invalid_op = ! (Inv_R_type || Inv_I_type || Inv_Loads); 
      
@@ -115,6 +115,7 @@ module SingleCycleCPU(halt, clk, rst);
    assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD);  
 
    // Supports R-Type and I-type instructions -- please add muxes and other control signals
+   
    ExecutionUnit EU(.out(RWrdata),
                     .opA(Rdata1), 
                     .opB(Rdata2), 
@@ -131,10 +132,10 @@ module SingleCycleCPU(halt, clk, rst);
 endmodule // SingleCycleCPU
 
 // responsible for immediate calculations
-module ALU_imm(out1, rs1, imm1, func, eaCalc);
+module ALU_imm(out1, rs1, imm1, funca, eaCalc);
    output [`WORD_WIDTH-1:0] out1;
-   input [`WORD_WIDTH-1:0]  rs1, imm;
-   input [2:0] 	 func;
+   input [`WORD_WIDTH-1:0]  rs1, imm1;
+   input [2:0] 	 funca;
    input eaCalc;
 
    wire [`WORD_WIDTH-1:0] add = rs1 + imm1; 
@@ -149,22 +150,22 @@ module ALU_imm(out1, rs1, imm1, func, eaCalc);
    wire [`WORD_WIDTH-1:0] sra =($signed(rs1)) >>> imm1[4:0];
    
    assign out1 =(eaCalc)? add:
-                (func == 3'b000) ? add :
-                (func == 3'b100) ? xored:
-                (func == 3'b110) ? ored :
-                (func == 3'b111) ? anded:
-                (func == 3'b010) ? signed_lt :
-                (func == 3'b011) ? unsigned_lt :
-                (func == 3'b001 && imm1[11:5] == 7'b0000000) ? sll :
-                (func == 3'b101 && imm1[11:5] == 7'b0000000) ? srl :
-                (func == 3'b101 && imm1[11:5] == 7'b0100000) ? sra : 32'hXXXXXXXX;
+                (funca == 3'b000) ? add :
+                (funca == 3'b100) ? xored:
+                (funca == 3'b110) ? ored :
+                (funca == 3'b111) ? anded:
+                (funca == 3'b010) ? signed_lt :
+                (funca == 3'b011) ? unsigned_lt :
+                (funca == 3'b001 && imm1[11:5] == 7'b0000000) ? sll :
+                (funca == 3'b101 && imm1[11:5] == 7'b0000000) ? srl :
+                (funca == 3'b101 && imm1[11:5] == 7'b0100000) ? sra : 32'hXXXXXXXX;
 endmodule
 
-module ALU_reg(out2, inA, inB, func, auxFunc);
+module ALU_reg(out2, inA, inB, funcb, auxFuncb);
    output [`WORD_WIDTH-1:0] out2;
    input [`WORD_WIDTH-1:0]  inA, inB;
-   input [2:0] 	 func;
-   input [6:0] 	 auxFunc;
+   input [2:0] 	 funcb;
+   input [6:0] 	 auxFuncb;
 
    wire [`WORD_WIDTH-1:0] add = inA + inB; 
    wire [`WORD_WIDTH-1:0] subtract = inA - inB;
@@ -177,24 +178,24 @@ module ALU_reg(out2, inA, inB, func, auxFunc);
    wire [`WORD_WIDTH-1:0] srl = inA >> inB[4:0];
    wire [`WORD_WIDTH-1:0] sra =($signed(inA)) >>> inB[4:0];
    
-   assign out2 = (func == 3'b000 && auxFunc == 7'b0000000) ? add :
-                (func == 3'b000 && auxFunc == 7'b0100000) ? subtract :
-                (func == 3'b001 && auxFunc == 7'b0000000) ? sll :
-                (func == 3'b010 && auxFunc == 7'b0000000) ? signed_lt :
-                (func == 3'b011 && auxFunc == 7'b0000000) ? unsigned_lt :
-                (func == 3'b100 && auxFunc == 7'b0000000) ? xored:
-                (func == 3'b101 && auxFunc == 7'b0000000) ? srl :
-                (func == 3'b101 && auxFunc == 7'b0100000) ? sra :
-                (func == 3'b110 && auxFunc == 7'b0000000) ? ored :
-                (func == 3'b111 && auxFunc == 7'b0000000) ? anded : 32'hXXXXXXXX;
+   assign out2 = (funcb == 3'b000 && auxFuncb == 7'b0000000) ? add :
+                (funcb == 3'b000 && auxFuncb == 7'b0100000) ? subtract :
+                (funcb == 3'b001 && auxFuncb == 7'b0000000) ? sll :
+                (funcb == 3'b010 && auxFuncb == 7'b0000000) ? signed_lt :
+                (funcb == 3'b011 && auxFuncb == 7'b0000000) ? unsigned_lt :
+                (funcb == 3'b100 && auxFuncb == 7'b0000000) ? xored:
+                (funcb == 3'b101 && auxFuncb == 7'b0000000) ? srl :
+                (funcb == 3'b101 && auxFuncb == 7'b0100000) ? sra :
+                (funcb == 3'b110 && auxFuncb == 7'b0000000) ? ored :
+                (funcb == 3'b111 && auxFuncb == 7'b0000000) ? anded : 32'hXXXXXXXX;
 endmodule
 
-module ALU_mux(out, aluSrc1, eaCalc, immresult, regresult);
-   output [`WORD_WIDTH-1 :0] out;
+module ALU_mux(out3, aluSrc1, eaCalc, immresult, regresult);
+   output [`WORD_WIDTH-1 :0] out3;
    input  aluSrc1, eaCalc;
    input [`WORD_WIDTH-1:0]  immresult, regresult;
 
-   assign out = (eaCalc || aluSrc1) ? imm_result: regresult;
+   assign out3 = (eaCalc || aluSrc1) ? immresult: regresult;
 
 endmodule
 
@@ -204,7 +205,7 @@ module ExecutionUnit(out, opA, opB, func, auxFunc, imm, aluSrc, EACalc);
    input [`WORD_WIDTH-1:0]  opA, opB, imm;
    input [2:0] 	 func;
    input [6:0] 	 auxFunc;
-   input ALUSrc, EACalc;
+   input aluSrc, EACalc;
    
    wire [`WORD_WIDTH-1:0] imm_result;
    wire [`WORD_WIDTH-1:0] reg_result;
@@ -213,16 +214,16 @@ module ExecutionUnit(out, opA, opB, func, auxFunc, imm, aluSrc, EACalc);
    ALU_imm imm_ops(.out1(imm_result), 
                    .rs1(opA), 
                    .imm1(imm), 
-                   .func(func),
+                   .funca(func),
                    .eaCalc(EACalc));
    
    ALU_reg reg_ops(.out2(reg_result),
                    .inA(opA),
                   .inB(opB), 
-                  .func(func), 
-                  .auxFunc(auxFunc));
+                  .funcb(func), 
+                  .auxFuncb(auxFunc));
    
-   ALU_mux mux (.out(out),
+   ALU_mux mux (.out3(out),
                .aluSrc1(aluSrc),
                .eaCalc(EACalc),
                .immresult(imm_result),
