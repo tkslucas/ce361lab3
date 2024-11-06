@@ -129,7 +129,7 @@ module SingleCycleCPU(halt, clk, rst);
                      
 
    assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD);  
-   assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD
+   assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD ||
                    opcode == `OPCODE_LUI || opcode == `OPCODE_AUIPC);
    assign RWrdata = (opcode == `OPCODE_LOAD) ? DataWord : 
                     (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM) ? EU_out : 
