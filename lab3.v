@@ -57,13 +57,18 @@ module SingleCycleCPU(halt, clk, rst);
    wire [`WORD_WIDTH-1 :0] immediate;
    wire        RWrEn;
    wire        ALUSrc, EACalc;
-   wire        Inv_R_type, Inv_I_type, Inv_Loads;
+   wire        Inv_R_type, Inv_I_type, Inv_Loads, Inv_U_type;
 
    wire [`WORD_WIDTH-1:0] NPC, PC_Plus_4;
    wire [6:0]  opcode;
 
    wire [6:0]  funct7;
    wire [2:0]  funct3;
+
+   wire [31:0] imm_upper;   // 20-bit immediate shifted to upper bits
+
+   wire [`WORD_WIDTH-1:0] lui_result; 
+   wire [`WORD_WIDTH-1:0] auipc_result;
    
    wire invalid_op;
    
@@ -83,6 +88,8 @@ module SingleCycleCPU(halt, clk, rst);
 
    assign Inv_Loads = ((opcode == `OPCODE_LOAD) && (funct3 == `FUNC_LB || funct3 == `FUNC_LH || funct3 == `FUNC_LW
                        || funct3 == `FUNC_LBU || funct3 == `FUNC_LHU));
+
+   assign Inv_U_type = ((opcode == `OPCODE_LUI) || (opcode == `OPCODE_AUIPC));
          
    assign invalid_op = ! (Inv_R_type || Inv_I_type || Inv_Loads); 
      
@@ -106,6 +113,8 @@ module SingleCycleCPU(halt, clk, rst);
    assign Rsrc2 = InstWord[24:20];
    assign funct7 = InstWord[31:25];  // R-Type
 
+   assign imm_upper = {InstWord[31:12], 12'b0}; 
+
    // control signal for R-type vs I-type instruction (0 for R, 1 for immediate)
    assign ALUSrc = (opcode == `OPCODE_COMPUTE_IMM) ? 1'b1 : 1'b0;
    assign EACalc_control = (opcode == `OPCODE_LOAD) ? 1'b1: 1'b0;
@@ -114,14 +123,23 @@ module SingleCycleCPU(halt, clk, rst);
 
    assign DataAddr = (opcode == `OPCODE_LOAD) ? EU_out: 32'hXXXXXXXX;
 
-   assign MemSize = ((opcode == `OPCODE_LOAD) && ((funct3 == `FUNC_LB) || (funct3 == `FUNC_LBU))) ? SIZE_BYTE :
-                     ((opcode == `OPCODE_LOAD) && ((funct3 == `FUNC_LH) || (funct3 == `FUNC_LHU))) ? SIZE_HWORD :
-                     ((opcode == `OPCODE_LOAD) && (funct3 == `FUNC_LW)) ? SIZE_WORD : 2'bXX; 
+   assign MemSize = ((opcode == `OPCODE_LOAD) && ((funct3 == `FUNC_LB) || (funct3 == `FUNC_LBU))) ? `SIZE_BYTE :
+                     ((opcode == `OPCODE_LOAD) && ((funct3 == `FUNC_LH) || (funct3 == `FUNC_LHU))) ? `SIZE_HWORD :
+                     ((opcode == `OPCODE_LOAD) && (funct3 == `FUNC_LW)) ? `SIZE_WORD : 2'bXX; 
                      
 
    assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD);  
+   assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD
+                   opcode == `OPCODE_LUI || opcode == `OPCODE_AUIPC);
    assign RWrdata = (opcode == `OPCODE_LOAD) ? DataWord : 
-                    (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM) ? EU_out : 32'hXXXXXXXX;
+                    (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM) ? EU_out : 
+                    (opcode == `OPCODE_LUI) ? lui_result :
+                    (opcode == `OPCODE_AUIPC) ? auipc_result :
+                    32'hXXXXXXXX;
+
+   // Supports U-Type instructions
+   assign lui_result = imm_upper;
+   assign auipc_result = PC + imm_upper;
 
    // Supports R-Type and I-type instructions -- please add muxes and other control signals
    
@@ -133,6 +151,7 @@ module SingleCycleCPU(halt, clk, rst);
                     .imm(immediate), 
                     .aluSrc(ALUSrc),
                     .EACalc(EACalc_control));
+
 
    // Fetch Address Datapath
    assign PC_Plus_4 = PC + 4;
