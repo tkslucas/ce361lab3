@@ -40,9 +40,20 @@
 `define FUNC_SH     3'b001
 `define FUNC_SW     3'b010
 
+// defined for M extension
+`define FUNC_MUL      3'b000
+`define FUNC_MULH     3'b001
+`define FUNC_MULSU    3'b010
+`define FUNC_MULU     3'b011
+`define FUNC_DIV      3'b100
+`define FUNC_DIVU     3'b101
+`define FUNC_REM      3'b110
+`define FUNC_REMU     3'b111
+
 // ----------------------------- AUX_FUNC --------------------------------------
-`define AUX_FUNC_ADD  7'b0000000 // same for xor,or,and,sll,srl,slt,sltu
-`define AUX_FUNC_SUB  7'b0100000 // same for sra
+`define AUX_FUNC_ADD    7'b0000000  // same for xor,or,and,sll,srl,slt,sltu
+`define AUX_FUNC_SUB    7'b0100000  // same for sra
+`define AUX_FUNC_M_EXT  7'b0000001  // same for all RV32M instructions
 
 `define SIZE_BYTE  2'b00
 `define SIZE_HWORD 2'b01
@@ -61,8 +72,8 @@ module SingleCycleCPU(halt, clk, rst);
    wire [`WORD_WIDTH-1:0] Rdata1, Rdata2, RWrdata, EU_out;
    wire [`WORD_WIDTH-1 :0] immediate, immediate_i, immediate_st;
    wire        RWrEn;
-   wire        ALUSrc, EACalc;
-   wire        Inv_R_type, Inv_I_type, Inv_Loads, Inv_U_type, Inv_S_type;
+   wire        ALUSrc, EACalc_control, muldiv_control;
+   wire        Inv_R_type, Inv_I_type, Inv_Loads, Inv_U_type, Inv_S_type, Inv_MulDiv;
 
    wire [`WORD_WIDTH-1:0] NPC, PC_Plus_4;
    wire [6:0]  opcode;
@@ -97,8 +108,12 @@ module SingleCycleCPU(halt, clk, rst);
    assign Inv_U_type = ((opcode == `OPCODE_LUI) || (opcode == `OPCODE_AUIPC));
 
    assign Inv_S_type = ((opcode == `OPCODE_STORE) && (funct3 == `FUNC_SB || funct3 == `FUNC_SH || funct3 == `FUNC_SW));
+
+   assign Inv_MulDiv = ((opcode == `OPCODE_MULDIV) && (funct7 == `AUX_FUNC_M_EXT) && (funct3 == `FUNC_MUL || funct3 == `FUNC_MULH
+                        || funct3 == `FUNC_MULSU || funct3 == `FUNC_MULU || funct3 == `FUNC_DIV || funct3 == `FUNC_DIVU 
+                        || funct3 == `FUNC_REM || funct3 == `FUNC_REMU));
                   
-   assign invalid_op = !(Inv_R_type || Inv_I_type || Inv_Loads || Inv_U_type || Inv_S_type); 
+   assign invalid_op = !(Inv_R_type || Inv_I_type || Inv_Loads || Inv_U_type || Inv_S_type || Inv_MulDiv); 
      
    // System State 
    Mem   MEM(.InstAddr(PC), .InstOut(InstWord), 
@@ -112,28 +127,23 @@ module SingleCycleCPU(halt, clk, rst);
 
    // Instruction Decode
    assign opcode = InstWord[6:0];   
-   
    assign Rdst = InstWord[11:7]; 
-
    assign Rsrc1 = InstWord[19:15]; 
-
    assign funct3 = InstWord[14:12];  // R-Type, I-Type, S-Type
-
    assign immediate_i = {{20{InstWord[31]}}, InstWord[31:20]};  // I-type
-
    assign immediate_st = {{20{InstWord[31]}}, InstWord[31:25], InstWord[11:7]}; // S-type
+   assign Rsrc2 = InstWord[24:20];
+   assign funct7 = InstWord[31:25];  // R-Type
+   assign imm_upper = {InstWord[31:12], 12'b0}; 
 
    assign immediate = (opcode == `OPCODE_STORE) ? immediate_st :
                       ((opcode == `OPCODE_LOAD || opcode == `OPCODE_COMPUTE_IMM)) ? immediate_i : 32'hXX;
 
-   assign Rsrc2 = InstWord[24:20];
-   assign funct7 = InstWord[31:25];  // R-Type
-
-   assign imm_upper = {InstWord[31:12], 12'b0}; 
 
    // control signal for R-type vs I-type instruction (0 for R, 1 for immediate)
-   assign ALUSrc = (opcode == `OPCODE_COMPUTE_IMM) ? 1'b1 : 1'b0;
-   assign EACalc_control = (opcode == `OPCODE_LOAD || opcode == `OPCODE_STORE) ? 1'b1: 1'b0;
+   assign ALUSrc = !invalid_op && (opcode == `OPCODE_COMPUTE_IMM) ? 1'b1 : 1'b0;
+   assign EACalc_control = !invalid_op && (opcode == `OPCODE_LOAD || opcode == `OPCODE_STORE) ? 1'b1: 1'b0;
+   assign muldiv_control = !invalid_op && (opcode == `OPCODE_MULDIV) ? 1'b1: 1'b0;
 
    assign MemWrEn = !invalid_op && (opcode == `OPCODE_STORE);
 
@@ -155,14 +165,14 @@ module SingleCycleCPU(halt, clk, rst);
                     (opcode == `OPCODE_STORE) ? store_size : 2'bXX;
                      
    assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD ||
-                   opcode == `OPCODE_LUI || opcode == `OPCODE_AUIPC);
+                   opcode == `OPCODE_LUI || opcode == `OPCODE_AUIPC || opcode== `OPCODE_MULDIV);
    
    assign RWrdata = (opcode == `OPCODE_LOAD && funct3 == `FUNC_LW) ? DataWord :
                     (opcode == `OPCODE_LOAD && funct3 == `FUNC_LH) ? {{16{DataWord[15]}}, DataWord[15:0]} :
                     (opcode == `OPCODE_LOAD && funct3 == `FUNC_LB) ? {{24{DataWord[7]}}, DataWord[7:0]} :
                     (opcode == `OPCODE_LOAD && funct3 == `FUNC_LBU) ? {24'b0, DataWord[7:0]} :
                     (opcode == `OPCODE_LOAD && funct3 == `FUNC_LHU) ? {16'b0, DataWord[15:0]} :
-                    (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM) ? EU_out : 
+                    (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_MULDIV) ? EU_out : 
                     (opcode == `OPCODE_LUI) ? lui_result :
                     (opcode == `OPCODE_AUIPC) ? auipc_result :
                     32'hXXXXXXXX;
@@ -180,8 +190,8 @@ module SingleCycleCPU(halt, clk, rst);
                     .auxFunc(funct7), 
                     .imm(immediate), 
                     .aluSrc(ALUSrc),
-                    .EACalc(EACalc_control));
-
+                    .EACalc(EACalc_control),
+                    .MulDiv(muldiv_control));
 
    // Fetch Address Datapath
    assign PC_Plus_4 = PC + 4;
@@ -219,12 +229,52 @@ module ALU_imm(out1, rs1, imm1, funca, eaCalc);
                 (funca == 3'b101 && imm1[11:5] == 7'b0100000) ? sra : 32'hXXXXXXXX;
 endmodule
 
+module MultDiv (out3, inputA, inputB, funcc, auxFuncc);
+   output [`WORD_WIDTH-1:0] out3;
+   input  [`WORD_WIDTH-1:0]  inputA, inputB;
+   input  [2:0] 	 funcc;
+   input  [6:0] 	 auxFuncc;
+   
+   wire signed [(`WORD_WIDTH * 2)-1:0] signed_inputA = {{`WORD_WIDTH{inputA[`WORD_WIDTH-1]}}, inputA};
+   wire signed [(`WORD_WIDTH * 2)-1:0] signed_inputB = {{`WORD_WIDTH{inputB[`WORD_WIDTH-1]}}, inputB};
+   wire  [(`WORD_WIDTH * 2)-1:0] unsigned_inputA = {{`WORD_WIDTH{1'b0}}, inputA};
+   wire  [(`WORD_WIDTH * 2)-1:0] unsigned_inputB = {{`WORD_WIDTH{1'b0}}, inputB};
+
+   wire [(`WORD_WIDTH *2)-1:0] result;
+
+   wire [(`WORD_WIDTH * 2)-1:0] mul = inputA * inputB;
+   wire [(`WORD_WIDTH * 2)-1:0] mul_ss = signed_inputA * signed_inputB;
+   wire [(`WORD_WIDTH * 2)-1:0] mul_su = signed_inputA * unsigned_inputB;
+   wire [(`WORD_WIDTH * 2)-1:0] mul_uu = unsigned_inputA * unsigned_inputB;
+
+   
+   wire [`WORD_WIDTH-1:0] signed_div = $signed(inputA) / $signed(inputB);
+   wire [`WORD_WIDTH-1:0] unsigned_div = inputA / inputB;
+   wire [`WORD_WIDTH-1:0] signed_remainder = $signed(inputA) % $signed(inputB);
+   wire [`WORD_WIDTH-1:0] unsigned_remainder = inputA % inputB;
+
+   assign result = (funcc == 3'b000 && auxFuncc == 7'b0000001) ? mul :
+                   (funcc == 3'b001 && auxFuncc == 7'b0000001) ? mul_ss :
+                   (funcc == 3'b010 && auxFuncc == 7'b0000001) ? mul_su :
+                   (funcc == 3'b011 && auxFuncc == 7'b0000001) ? mul_uu : 64'hXX;
+
+   assign out3 = (funcc == 3'b000 && auxFuncc == 7'b0000001) ? result[31:0] :
+                 (funcc == 3'b001 && auxFuncc == 7'b0000001) ? result[63:32] :
+                 (funcc == 3'b010 && auxFuncc == 7'b0000001) ? result[63:32] :
+                 (funcc == 3'b011 && auxFuncc == 7'b0000001) ? result[63:32] :
+                 (funcc == 3'b100 && auxFuncc == 7'b0000001) ? signed_div:
+                 (funcc == 3'b101 && auxFuncc == 7'b0000001) ? unsigned_div :
+                 (funcc == 3'b110 && auxFuncc == 7'b0000001) ? signed_remainder :
+                 (funcc == 3'b111 && auxFuncc == 7'b0000001) ? unsigned_remainder : 32'hXX;
+endmodule
+
 module ALU_reg(out2, inA, inB, funcb, auxFuncb);
    output [`WORD_WIDTH-1:0] out2;
    input [`WORD_WIDTH-1:0]  inA, inB;
    input [2:0] 	 funcb;
    input [6:0] 	 auxFuncb;
 
+   
    wire [`WORD_WIDTH-1:0] add = inA + inB; 
    wire [`WORD_WIDTH-1:0] subtract = inA - inB;
    wire [`WORD_WIDTH-1:0] ored = inA | inB;
@@ -235,6 +285,7 @@ module ALU_reg(out2, inA, inB, funcb, auxFuncb);
    wire [`WORD_WIDTH-1:0] sll = inA << inB[4:0];
    wire [`WORD_WIDTH-1:0] srl = inA >> inB[4:0];
    wire [`WORD_WIDTH-1:0] sra =($signed(inA)) >>> inB[4:0];
+
    
    assign out2 = (funcb == 3'b000 && auxFuncb == 7'b0000000) ? add :
                 (funcb == 3'b000 && auxFuncb == 7'b0100000) ? subtract :
@@ -248,26 +299,27 @@ module ALU_reg(out2, inA, inB, funcb, auxFuncb);
                 (funcb == 3'b111 && auxFuncb == 7'b0000000) ? anded : 32'hXXXXXXXX;
 endmodule
 
-module ALU_mux(out3, aluSrc1, eaCalc, immresult, regresult);
-   output [`WORD_WIDTH-1 :0] out3;
-   input  aluSrc1, eaCalc;
-   input [`WORD_WIDTH-1:0]  immresult, regresult;
+module ALU_mux(out4, aluSrc1, eaCalc, muldiv, immresult, regresult, muldivresult);
+   output [`WORD_WIDTH-1 :0] out4;
+   input  aluSrc1, eaCalc, muldiv;
+   input [`WORD_WIDTH-1:0]  immresult, regresult, muldivresult;
 
-   assign out3 = (eaCalc || aluSrc1) ? immresult: regresult;
-
+   assign out4 = (muldiv == 1'b1) ? muldivresult :
+                 (eaCalc == 1'b1) ? immresult :
+                 (aluSrc1 == 1'b1) ? immresult :
+                 (aluSrc1 == 1'b0) ? regresult : 32'hXX;
 endmodule
 
-// You will need to extend it. Feel free to modify the interface also
-module ExecutionUnit(out, opA, opB, func, auxFunc, imm, aluSrc, EACalc);
+module ExecutionUnit(out, opA, opB, func, auxFunc, imm, aluSrc, EACalc, MulDiv);
    output [`WORD_WIDTH-1:0] out;
    input [`WORD_WIDTH-1:0]  opA, opB, imm;
    input [2:0] 	 func;
    input [6:0] 	 auxFunc;
-   input aluSrc, EACalc;
+   input aluSrc, EACalc, MulDiv;
    
    wire [`WORD_WIDTH-1:0] imm_result;
    wire [`WORD_WIDTH-1:0] reg_result;
-
+   wire [`WORD_WIDTH-1 :0] muldiv_result;
 
    ALU_imm imm_ops(.out1(imm_result), 
                    .rs1(opA), 
@@ -280,11 +332,19 @@ module ExecutionUnit(out, opA, opB, func, auxFunc, imm, aluSrc, EACalc);
                   .inB(opB), 
                   .funcb(func), 
                   .auxFuncb(auxFunc));
-   
-   ALU_mux mux (.out3(out),
+
+   MultDiv multiplier(.out3(muldiv_result),
+                      .inputA(opA),
+                      .inputB(opB),
+                      .funcc(func),
+                      .auxFuncc(auxFunc));
+
+   ALU_mux mux (.out4(out),
                .aluSrc1(aluSrc),
                .eaCalc(EACalc),
+               .muldiv(MulDiv),
                .immresult(imm_result),
-               .regresult(reg_result));
+               .regresult(reg_result),
+               .muldivresult(muldiv_result));
 
 endmodule // ExecutionUnit
