@@ -28,6 +28,9 @@
 `define FUNC_SLT      3'b010
 `define FUNC_SLTU     3'b011
 
+// jalr, I-type
+`define FUNC_JALR     3'b000
+
 // for clarity: redefined for loads
 `define FUNC_LB      3'b000
 `define FUNC_LH      3'b001
@@ -39,6 +42,14 @@
 `define FUNC_SB     3'b000
 `define FUNC_SH     3'b001
 `define FUNC_SW     3'b010
+
+// Branch func3 codes
+`define FUNC_BEQ     3'b000  // Branch if equal
+`define FUNC_BNE     3'b001  // Branch if not equal
+`define FUNC_BLT     3'b100  // Branch if less than
+`define FUNC_BGE     3'b101  // Branch if greater or equal
+`define FUNC_BLTU    3'b110  // Branch if less than, unsigned
+`define FUNC_BGEU    3'b111  // Branch if greater or equal, unsigned
 
 // defined for M extension
 `define FUNC_MUL      3'b000
@@ -70,10 +81,10 @@ module SingleCycleCPU(halt, clk, rst);
    
    wire [4:0]  Rsrc1, Rsrc2, Rdst;
    wire [`WORD_WIDTH-1:0] Rdata1, Rdata2, RWrdata, EU_out;
-   wire [`WORD_WIDTH-1 :0] immediate, immediate_i, immediate_st;
+   wire [`WORD_WIDTH-1 :0] immediate, immediate_i, immediate_j, immediate_b, immediate_st;
    wire        RWrEn;
    wire        ALUSrc, EACalc_control, muldiv_control;
-   wire        Inv_R_type, Inv_I_type, Inv_Loads, Inv_U_type, Inv_S_type, Inv_MulDiv;
+   wire        Inv_R_type, Inv_I_type, Inv_Loads, Inv_B_type, Inv_J_type, Inv_U_type, Inv_S_type, Inv_MulDiv;
 
    wire [`WORD_WIDTH-1:0] NPC, PC_Plus_4;
    wire [6:0]  opcode;
@@ -81,8 +92,16 @@ module SingleCycleCPU(halt, clk, rst);
    wire [6:0]  funct7;
    wire [2:0]  funct3;
 
-   wire [31:0] imm_upper;   // 20-bit immediate shifted to upper bits
+   // Branch
+   wire branch_taken;
+   wire [`WORD_WIDTH-1:0] branch_target;
 
+   // Jumps
+   wire [`WORD_WIDTH-1:0] jal_target;
+   wire [`WORD_WIDTH-1:0] jalr_target;
+
+   // U-Type
+   wire [31:0] imm_upper;   // 20-bit immediate shifted to upper bits
    wire [`WORD_WIDTH-1:0] lui_result; 
    wire [`WORD_WIDTH-1:0] auipc_result;
    
@@ -99,11 +118,17 @@ module SingleCycleCPU(halt, clk, rst);
                         ));
 
    assign Inv_I_type = ((opcode == `OPCODE_COMPUTE_IMM) && ((funct3 == `FUNC_ADD || funct3 == `FUNC_XOR 
-                        || funct3 == `FUNC_OR || funct3 == `FUNC_AND || funct3 == `FUNC_SLL || funct3 == `FUNC_SRL ||
-                        funct3 == `FUNC_SRA || funct3 == `FUNC_SLT || funct3 == `FUNC_SLTU)));
+                         || funct3 == `FUNC_OR || funct3 == `FUNC_AND || funct3 == `FUNC_SLL || funct3 == `FUNC_SRL ||
+                         funct3 == `FUNC_SRA || funct3 == `FUNC_SLT || funct3 == `FUNC_SLTU)))
+                        || ((opcode == `OPCODE_JALR) && (funct3 == `FUNC_JALR)) ;
 
    assign Inv_Loads = ((opcode == `OPCODE_LOAD) && (funct3 == `FUNC_LB || funct3 == `FUNC_LH || funct3 == `FUNC_LW
                        || funct3 == `FUNC_LBU || funct3 == `FUNC_LHU));
+
+   assign Inv_B_type = ((opcode == `OPCODE_BRANCH) && ((funct3 == `FUNC_BEQ) || (funct3 == `FUNC_BNE)
+                        || (funct3 == `FUNC_BLT) || (funct3 == `FUNC_BGE) || (funct3 == `FUNC_BLTU) || (funct3 == `FUNC_BGEU)));
+   
+   assign Inv_J_type = (opcode == `OPCODE_JAL);
 
    assign Inv_U_type = ((opcode == `OPCODE_LUI) || (opcode == `OPCODE_AUIPC));
 
@@ -113,7 +138,7 @@ module SingleCycleCPU(halt, clk, rst);
                         || funct3 == `FUNC_MULSU || funct3 == `FUNC_MULU || funct3 == `FUNC_DIV || funct3 == `FUNC_DIVU 
                         || funct3 == `FUNC_REM || funct3 == `FUNC_REMU));
                   
-   assign invalid_op = !(Inv_R_type || Inv_I_type || Inv_Loads || Inv_U_type || Inv_S_type || Inv_MulDiv); 
+   assign invalid_op = !(Inv_R_type || Inv_I_type || Inv_Loads || Inv_B_type || Inv_J_type || Inv_U_type || Inv_S_type || Inv_MulDiv); 
      
    // System State 
    Mem   MEM(.InstAddr(PC), .InstOut(InstWord), 
@@ -131,10 +156,13 @@ module SingleCycleCPU(halt, clk, rst);
    assign Rsrc1 = InstWord[19:15]; 
    assign funct3 = InstWord[14:12];  // R-Type, I-Type, S-Type
    assign immediate_i = {{20{InstWord[31]}}, InstWord[31:20]};  // I-type
+   assign immediate_b = {{19{InstWord[31]}}, InstWord[31], InstWord[7], InstWord[30:25], InstWord[11:8], 1'b0};
+   assign immediate_j = {{11{InstWord[31]}}, InstWord[31], InstWord[19:12], InstWord[20], InstWord[30:21], 1'b0}; // J-type
    assign immediate_st = {{20{InstWord[31]}}, InstWord[31:25], InstWord[11:7]}; // S-type
    assign Rsrc2 = InstWord[24:20];
    assign funct7 = InstWord[31:25];  // R-Type
    assign imm_upper = {InstWord[31:12], 12'b0}; 
+
 
    assign immediate = (opcode == `OPCODE_STORE) ? immediate_st :
                       ((opcode == `OPCODE_LOAD || opcode == `OPCODE_COMPUTE_IMM)) ? immediate_i : 32'hXX;
@@ -173,9 +201,26 @@ module SingleCycleCPU(halt, clk, rst);
                     (opcode == `OPCODE_LOAD && funct3 == `FUNC_LBU) ? {24'b0, DataWord[7:0]} :
                     (opcode == `OPCODE_LOAD && funct3 == `FUNC_LHU) ? {16'b0, DataWord[15:0]} :
                     (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_MULDIV) ? EU_out : 
+                    (opcode == `OPCODE_JAL || opcode == `OPCODE_JALR) ? PC_Plus_4 :
                     (opcode == `OPCODE_LUI) ? lui_result :
                     (opcode == `OPCODE_AUIPC) ? auipc_result :
                     32'hXXXXXXXX;
+
+   // Supports B-Type instructions
+   // Calculate branch target address
+   assign branch_target = PC + immediate_b;
+   assign branch_taken = (opcode == `OPCODE_BRANCH) && (
+     (funct3 == `FUNC_BEQ  && (Rdata1 == Rdata2)) ||   // BEQ
+     (funct3 == `FUNC_BNE  && (Rdata1 != Rdata2)) ||   // BNE
+     (funct3 == `FUNC_BLT  && ($signed(Rdata1) < $signed(Rdata2))) || // BLT
+     (funct3 == `FUNC_BGE  && ($signed(Rdata1) >= $signed(Rdata2))) || // BGE
+     (funct3 == `FUNC_BLTU && (Rdata1 < Rdata2)) ||    // BLTU (unsigned)
+     (funct3 == `FUNC_BGEU && (Rdata1 >= Rdata2))      // BGEU (unsigned)
+   );
+
+   // Jumps
+   assign jal_target = PC + immediate_j;
+   assign jalr_target = (Rdata1 + immediate_i) & ~1;
 
    // Supports U-Type instructions
    assign lui_result = imm_upper;
@@ -195,7 +240,10 @@ module SingleCycleCPU(halt, clk, rst);
 
    // Fetch Address Datapath
    assign PC_Plus_4 = PC + 4;
-   assign NPC = PC_Plus_4;
+   assign NPC = (opcode == `OPCODE_JAL)  ? jal_target :
+                (opcode == `OPCODE_JALR) ? jalr_target :
+                branch_taken             ? branch_target :
+                PC_Plus_4;
    
 endmodule // SingleCycleCPU
 
