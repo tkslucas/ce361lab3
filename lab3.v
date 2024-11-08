@@ -193,7 +193,8 @@ module SingleCycleCPU(halt, clk, rst);
                     (opcode == `OPCODE_STORE) ? store_size : 2'bXX;
                      
    assign RWrEn = (opcode == `OPCODE_COMPUTE || opcode == `OPCODE_COMPUTE_IMM || opcode == `OPCODE_LOAD ||
-                   opcode == `OPCODE_LUI || opcode == `OPCODE_AUIPC || opcode== `OPCODE_MULDIV);
+                   opcode == `OPCODE_LUI || opcode == `OPCODE_AUIPC || opcode== `OPCODE_MULDIV ||
+                   opcode == `OPCODE_JAL || opcode == `OPCODE_JALR);
    
    assign RWrdata = (opcode == `OPCODE_LOAD && funct3 == `FUNC_LW) ? DataWord :
                     (opcode == `OPCODE_LOAD && funct3 == `FUNC_LH) ? {{16{DataWord[15]}}, DataWord[15:0]} :
