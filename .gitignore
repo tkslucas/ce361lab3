@@ -1,2 +1,8 @@
-*.vcd
+# Binaries
 RISCtakers_lab3
+risctakers_lab3
+
+# Outputs
+*.vcd
+mem_out.hex
+regs_out.hex
