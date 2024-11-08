@@ -122,8 +122,9 @@ module SingleCycleCPU(halt, clk, rst);
                          funct3 == `FUNC_SRA || funct3 == `FUNC_SLT || funct3 == `FUNC_SLTU)))
                         || ((opcode == `OPCODE_JALR) && (funct3 == `FUNC_JALR)) ;
 
-   assign Inv_Loads = ((opcode == `OPCODE_LOAD) && (funct3 == `FUNC_LB || funct3 == `FUNC_LH || funct3 == `FUNC_LW
-                       || funct3 == `FUNC_LBU || funct3 == `FUNC_LHU));
+   assign Inv_Loads = ((opcode == `OPCODE_LOAD) && ((funct3 == `FUNC_LB || funct3 == `FUNC_LBU) || 
+                        ((funct3 == `FUNC_LW) && (DataAddr[1:0] == 2'b00)) || 
+                        ((funct3 == `FUNC_LBU || funct3 == `FUNC_LHU) && (DataAddr[0] == 1'b0))));
 
    assign Inv_B_type = ((opcode == `OPCODE_BRANCH) && ((funct3 == `FUNC_BEQ) || (funct3 == `FUNC_BNE)
                         || (funct3 == `FUNC_BLT) || (funct3 == `FUNC_BGE) || (funct3 == `FUNC_BLTU) || (funct3 == `FUNC_BGEU)));
@@ -132,13 +133,15 @@ module SingleCycleCPU(halt, clk, rst);
 
    assign Inv_U_type = ((opcode == `OPCODE_LUI) || (opcode == `OPCODE_AUIPC));
 
-   assign Inv_S_type = ((opcode == `OPCODE_STORE) && (funct3 == `FUNC_SB || funct3 == `FUNC_SH || funct3 == `FUNC_SW));
+   assign Inv_S_type = ((opcode == `OPCODE_STORE) && (funct3 == `FUNC_SB || 
+                        ((funct3 == `FUNC_SH) && (Rdata2[0] == 1'b0)) 
+                        || ((funct3 == `FUNC_SW) && (Rdata2[1:0] == 2'b00))));
 
    assign Inv_MulDiv = ((opcode == `OPCODE_MULDIV) && (funct7 == `AUX_FUNC_M_EXT) && (funct3 == `FUNC_MUL || funct3 == `FUNC_MULH
                         || funct3 == `FUNC_MULSU || funct3 == `FUNC_MULU || funct3 == `FUNC_DIV || funct3 == `FUNC_DIVU 
                         || funct3 == `FUNC_REM || funct3 == `FUNC_REMU));
-                  
-   assign invalid_op = !(Inv_R_type || Inv_I_type || Inv_Loads || Inv_B_type || Inv_J_type || Inv_U_type || Inv_S_type || Inv_MulDiv); 
+
+   assign invalid_op = !(Inv_R_type || Inv_I_type || Inv_Loads || Inv_B_type || Inv_J_type || Inv_U_type || Inv_S_type || Inv_MulDiv ); 
      
    // System State 
    Mem   MEM(.InstAddr(PC), .InstOut(InstWord), 
@@ -166,7 +169,6 @@ module SingleCycleCPU(halt, clk, rst);
 
    assign immediate = (opcode == `OPCODE_STORE) ? immediate_st :
                       ((opcode == `OPCODE_LOAD || opcode == `OPCODE_COMPUTE_IMM)) ? immediate_i : 32'hXX;
-
 
    // control signal for R-type vs I-type instruction (0 for R, 1 for immediate)
    assign ALUSrc = !invalid_op && (opcode == `OPCODE_COMPUTE_IMM) ? 1'b1 : 1'b0;
